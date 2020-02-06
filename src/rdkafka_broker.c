@@ -954,8 +954,6 @@ static void rd_kafka_buf_finalize (rd_kafka_t *rk, rd_kafka_buf_t *rkbuf) {
         if (rkbuf->rkbuf_flags & RD_KAFKA_OP_F_FLEXVER && 0)
                 rd_kafka_buf_update_i16(rkbuf, 4+2+2+4,
                                         strlen(rk->rk_conf.client_id_str) + 1);
-
-        rd_buf_dump(&rkbuf->rkbuf_buf, 1);
 }
 
 
