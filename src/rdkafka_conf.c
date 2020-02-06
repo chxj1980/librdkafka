@@ -265,13 +265,18 @@ static const struct rd_kafka_property rd_kafka_properties[] = {
 	  .sdef =  "rdkafka" },
         { _RK_GLOBAL|_RK_HIDDEN, "client.software.name", _RK_C_STR,
           _RK(sw_name),
-          "Client software name as reported to broker version >= v2.4.0",
+          "Client software name as reported to broker version >= v2.4.0. "
+          "This property should only be set by high-level language "
+          "librdkafka client bindings.",
           .sdef = "librdkafka"
         },
         { _RK_GLOBAL|_RK_HIDDEN, "client.software.version", _RK_C_STR,
           _RK(sw_version),
           "Client software version as reported to broker version >= v2.4.0. "
-          "If changing this it is recommended to append the librdkafka version.",
+          "This property should only be set by high-level language "
+          "librdkafka client bindings."
+          "If changing this it is highly recommended to append the "
+          "librdkafka version.",
         },
 	{ _RK_GLOBAL|_RK_HIGH, "metadata.broker.list", _RK_C_STR,
           _RK(brokerlist),

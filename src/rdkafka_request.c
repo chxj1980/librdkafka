@@ -1903,18 +1903,7 @@ rd_kafka_handle_ApiVersion (rd_kafka_t *rk,
                 goto err;
 
 	rd_kafka_buf_read_i16(rkbuf, &ErrorCode);
-        if (request->rkbuf_reqhdr.ApiVersion >= 3) {
-                uint64_t uva;
-                rd_assert(rkbuf->rkbuf_flags & RD_KAFKA_OP_F_FLEXVER);
-                rd_kafka_buf_read_uvarint(rkbuf, &uva);
-                ApiArrayCnt = (int32_t)uva - 1; /* COMPACT_ARRAY encoding */
-        } else
-                rd_kafka_buf_read_i32(rkbuf, &ApiArrayCnt);
-
-	if (ApiArrayCnt > 1000 || ApiArrayCnt < 0)
-		rd_kafka_buf_parse_fail(rkbuf,
-					"ApiArrayCnt %"PRId32" out of range",
-					ApiArrayCnt);
+        rd_kafka_buf_read_arraycnt(rkbuf, &ApiArrayCnt, 1000);
 
         if (ErrorCode && ApiArrayCnt == 0) {
                 /* Version >=3 returns the ApiVersions array if the error

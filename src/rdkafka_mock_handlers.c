@@ -1454,30 +1454,33 @@ rd_kafka_mock_handle_EndTxn (rd_kafka_mock_connection_t *mconn,
  */
 const struct rd_kafka_mock_api_handler
 rd_kafka_mock_api_handlers[RD_KAFKAP__NUM] = {
-        [RD_KAFKAP_Produce] = { 0, 7, rd_kafka_mock_handle_Produce },
-        [RD_KAFKAP_Fetch] = { 0, 11, rd_kafka_mock_handle_Fetch },
-        [RD_KAFKAP_Offset] = { 0, 5, rd_kafka_mock_handle_ListOffset },
-        [RD_KAFKAP_OffsetFetch] = { 0, 5, rd_kafka_mock_handle_OffsetFetch },
-        [RD_KAFKAP_OffsetCommit] = { 0, 7, rd_kafka_mock_handle_OffsetCommit },
-        [RD_KAFKAP_ApiVersion] = { 0, 2, rd_kafka_mock_handle_ApiVersion },
-        [RD_KAFKAP_Metadata] = { 0, 2, rd_kafka_mock_handle_Metadata },
-        [RD_KAFKAP_FindCoordinator] = { 0, 2,
+        [RD_KAFKAP_Produce] = { 0, 7, -1, rd_kafka_mock_handle_Produce },
+        [RD_KAFKAP_Fetch] = { 0, 11, -1, rd_kafka_mock_handle_Fetch },
+        [RD_KAFKAP_Offset] = { 0, 5, -1, rd_kafka_mock_handle_ListOffset },
+        [RD_KAFKAP_OffsetFetch] = { 0, 5, 6, rd_kafka_mock_handle_OffsetFetch },
+        [RD_KAFKAP_OffsetCommit] = { 0, 7, 8,
+                                     rd_kafka_mock_handle_OffsetCommit },
+        [RD_KAFKAP_ApiVersion] = { 0, 2, 3, rd_kafka_mock_handle_ApiVersion },
+        [RD_KAFKAP_Metadata] = { 0, 2, 9, rd_kafka_mock_handle_Metadata },
+        [RD_KAFKAP_FindCoordinator] = { 0, 2, 3,
                                         rd_kafka_mock_handle_FindCoordinator },
-        [RD_KAFKAP_InitProducerId] = { 0, 1,
+        [RD_KAFKAP_InitProducerId] = { 0, 1, 2,
                                        rd_kafka_mock_handle_InitProducerId },
-        [RD_KAFKAP_AddPartitionsToTxn]  = { 0, 1,
+        [RD_KAFKAP_AddPartitionsToTxn]  = { 0, 1, -1,
                                             rd_kafka_mock_handle_AddPartitionsToTxn },
-        [RD_KAFKAP_AddOffsetsToTxn] = { 0, 1,
+        [RD_KAFKAP_AddOffsetsToTxn] = { 0, 1, -1,
                                         rd_kafka_mock_handle_AddOffsetsToTxn },
-        [RD_KAFKAP_TxnOffsetCommit] = { 0, 2,
+        [RD_KAFKAP_TxnOffsetCommit] = { 0, 2, 3,
                                         rd_kafka_mock_handle_TxnOffsetCommit },
-        [RD_KAFKAP_EndTxn] = { 0, 1, rd_kafka_mock_handle_EndTxn },
+        [RD_KAFKAP_EndTxn] = { 0, 1, -1, rd_kafka_mock_handle_EndTxn },
 };
 
 
 
 /**
- * @brief Handle ApiVersionRequest
+ * @brief Handle ApiVersionRequest.
+ *
+ * @remark This is the only handler that needs to handle unsupported ApiVersions.
  */
 static int rd_kafka_mock_handle_ApiVersion (rd_kafka_mock_connection_t *mconn,
                                             rd_kafka_buf_t *rkbuf) {
@@ -1485,10 +1488,16 @@ static int rd_kafka_mock_handle_ApiVersion (rd_kafka_mock_connection_t *mconn,
         rd_kafka_buf_t *resp = rd_kafka_mock_buf_new_response(rkbuf);
         size_t of_ApiKeysCnt;
         int cnt = 0;
+        rd_kafka_resp_err_t err = RD_KAFKA_RESP_ERR_NO_ERROR;
         int i;
 
+        if (!rd_kafka_mock_cluster_ApiVersion_check(
+                    mcluster,
+                    rkbuf->rkbuf_reqhdr.ApiKey, rkbuf->rkbuf_reqhdr.ApiVersion))
+                err = RD_KAFKA_RESP_ERR_UNSUPPORTED_VERSION;
+
         /* ErrorCode */
-        rd_kafka_buf_write_i16(resp, RD_KAFKA_RESP_ERR_NO_ERROR);
+        rd_kafka_buf_write_i16(resp, err);
 
         /* #ApiKeys */
         of_ApiKeysCnt = rd_kafka_buf_write_i32(resp, 0); /* updated later */
@@ -1497,6 +1506,12 @@ static int rd_kafka_mock_handle_ApiVersion (rd_kafka_mock_connection_t *mconn,
                 if (!mcluster->api_handlers[i].cb ||
                     mcluster->api_handlers[i].MaxVersion == -1)
                         continue;
+
+
+                if (rkbuf->rkbuf_reqhdr.ApiVersion >= 3) {
+                        if (err && i != RD_KAFKAP_ApiVersion)
+                                continue;
+                }
 
                 /* ApiKey */
                 rd_kafka_buf_write_i16(resp, (int16_t)i);

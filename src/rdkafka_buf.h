@@ -392,6 +392,31 @@ rd_tmpabuf_write_str0 (const char *func, int line,
 	} while (0)
 
 /**
+ * @brief Read Kafka COMPACT_STRING (VARINT+N) or
+ *        standard String representation (2+N).
+ *
+ * The kstr data will be updated to point to the rkbuf. */
+#define rd_kafka_buf_read_compact_str(rkbuf, kstr) do {                 \
+                int _klen;                                              \
+                if ((rkbuf)->rkbuf_flags & RD_KAFKA_OP_F_FLEXVER) {     \
+                        uint64_t _uva;                                  \
+                        rd_kafka_buf_read_uvarint(rkbuf, &_uva);        \
+                        (kstr)->len = ((int32_t)_uva) - 1;              \
+                } else {                                                \
+                        rd_kafka_buf_read_i16a(rkbuf, (kstr)->len);     \
+                        _klen = RD_KAFKAP_STR_LEN(kstr);                \
+                }                                                       \
+                if (RD_KAFKAP_STR_IS_NULL(kstr))                        \
+                        (kstr)->str = NULL;                             \
+                else if (RD_KAFKAP_STR_LEN(kstr) == 0)                  \
+                        (kstr)->str = "";                               \
+                else if (!((kstr)->str =                                \
+                           rd_slice_ensure_contig(&rkbuf->rkbuf_reader, \
+                                                  _klen)))              \
+                        rd_kafka_buf_check_len(rkbuf, _klen);           \
+        } while (0)
+
+/**
  * Skip a string.
  */
 #define rd_kafka_buf_skip_str(rkbuf) do {			\
@@ -483,6 +508,35 @@ rd_tmpabuf_write_str0 (const char *func, int line,
         }                                                               \
         } while (0)
 
+
+/**
+ * @brief Reads an ARRAY or COMPACT_ARRAY count depending on buffer type.
+ */
+#define rd_kafka_buf_read_arraycnt(rkbuf,arrcnt,maxval) do {            \
+        if ((rkbuf)->rkbuf_flags & RD_KAFKA_OP_F_FLEXVER) {             \
+                uint64_t _uva;                                          \
+                rd_kafka_buf_read_uvarint(rkbuf, &_uva);                \
+                *(arrcnt) = _uva - 1;                                   \
+        } else {                                                        \
+                rd_kafka_buf_read_i32(rkbuf, arrcnt);                   \
+        }                                                               \
+        if (*(arrcnt) < 0 || ((maxval) != -1 && *(arrcnt) > (maxval)))  \
+                                rd_kafka_buf_parse_fail(rkbuf,          \
+                                                        "ApiArrayCnt %"PRId32" out of range", \
+                                                        *(arrcnt));     \
+        } while (0)
+
+/**
+ * @brief Writes an ARRAY or COMPACT_ARRAY count depending on buffer type.
+ */
+static RD_UNUSED RD_INLINE size_t
+rd_kafka_buf_write_arraycnt (rd_kafka_buf_t *rkbuf, int arrcnt) {
+
+        if (rkbuf->rkbuf_flags & RD_KAFKA_OP_F_FLEXVER)
+                return rd_kafka_buf_write_uvarint(rkbuf, (uint64_t)(arrcnt + 1));
+        else
+                return rd_kafka_buf_write_i32(rkbuf, arrcnt);
+}
 
 
 /**
@@ -991,6 +1045,9 @@ static RD_INLINE size_t
 rd_kafka_buf_write_compact_str (rd_kafka_buf_t *rkbuf,
                                 const char *str, size_t len) {
         size_t r;
+
+        if (!(rkbuf->rkbuf_flags & RD_KAFKA_OP_F_FLEXVER))
+                return rd_kafka_buf_write_str(rkbuf, str, len);
 
         /* COMAPCT_STRING lengths are:
          *  0   = NULL,
