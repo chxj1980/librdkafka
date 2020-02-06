@@ -253,16 +253,26 @@ static const struct rd_kafka_property rd_kafka_properties[] = {
 #endif
 #if WITH_ZSTD
 		{ 0x400, "zstd" },
-#endif         
+#endif
 #if WITH_SASL_OAUTHBEARER
                 { 0x800, "sasl_oauthbearer" },
-#endif         
+#endif
 		{ 0, NULL }
 		}
 	},
 	{ _RK_GLOBAL, "client.id", _RK_C_STR, _RK(client_id_str),
 	  "Client identifier.",
 	  .sdef =  "rdkafka" },
+        { _RK_GLOBAL|_RK_HIDDEN, "client.software.name", _RK_C_STR,
+          _RK(sw_name),
+          "Client software name as reported to broker version >= v2.4.0",
+          .sdef = "librdkafka"
+        },
+        { _RK_GLOBAL|_RK_HIDDEN, "client.software.version", _RK_C_STR,
+          _RK(sw_version),
+          "Client software version as reported to broker version >= v2.4.0. "
+          "If changing this it is recommended to append the librdkafka version.",
+        },
 	{ _RK_GLOBAL|_RK_HIGH, "metadata.broker.list", _RK_C_STR,
           _RK(brokerlist),
 	  "Initial list of brokers as a CSV list of broker host or host:port. "
@@ -3248,6 +3258,48 @@ void *rd_kafka_confval_get_ptr (const rd_kafka_confval_t *confval) {
 
 
 /**
+ * @returns true if the string is KIP-511 safe, else false.
+ */
+
+static rd_bool_t rd_kafka_sw_str_is_safe (const char *str) {
+        const char *s;
+
+        for (s = str ; *s ; s++) {
+                int c = (int)*s;
+
+                if (unlikely(!((c >= 'a' && c <= 'z') ||
+                               (c >= 'A' && c <= 'Z') ||
+                               (c >= '0' && c <= '9') ||
+                               c == '-' || c == '.')))
+                        return rd_false;
+        }
+
+        return rd_true;
+}
+
+
+/**
+ * @brief Sanitize KIP-511 software name/version strings in-place,
+ *        replacing unaccepted characters with "-".
+ *
+ * @warning The \p str is modified in-place.
+ */
+static void rd_kafka_sw_str_sanitize_inplace (char *str) {
+        char *s;
+
+        for (s = str ; *s ; s++) {
+                int c = (int)*s;
+
+                if (unlikely(!((c >= 'a' && c <= 'z') ||
+                               (c >= 'A' && c <= 'Z') ||
+                               (c >= '0' && c <= '9') ||
+                               c == '-' || c == '.')))
+                        *s = '-';
+        }
+}
+
+
+/**
  * @brief Verify configuration \p conf is
  *        correct/non-conflicting and finalize the configuration
  *        settings for use.
@@ -3256,6 +3308,22 @@ void *rd_kafka_confval_get_ptr (const rd_kafka_confval_t *confval) {
  */
 const char *rd_kafka_conf_finalize (rd_kafka_type_t cltype,
                                     rd_kafka_conf_t *conf) {
+
+        if (!conf->sw_name)
+                rd_kafka_conf_set(conf, "client.software.name", "librdkafka",
+                                  NULL, 0);
+        if (!conf->sw_version)
+                rd_kafka_conf_set(conf, "client.software.version",
+                                  rd_kafka_version_str(),
+                                  NULL, 0);
+
+        /* The client.software.name and .version are sent to the broker
+         * with the ApiVersionRequest starting with AK 2.4.0 (KIP-511).
+         * These strings need to be sanitized or the broker will reject them,
+         * so modify them in-place here. */
+        rd_assert(conf->sw_name && conf->sw_version);
+        rd_kafka_sw_str_sanitize_inplace(conf->sw_name);
+        rd_kafka_sw_str_sanitize_inplace(conf->sw_version);
 
         /* Verify mandatory configuration */
         if (!conf->socket_cb)
@@ -3568,6 +3636,20 @@ int rd_kafka_conf_warn (rd_kafka_t *rk) {
                              "Configuration property `sasl.username` only "
                              "applies when `sasl.mechanism` is set to "
                              "PLAIN or SCRAM-SHA-..");
+
+        if (rd_kafka_conf_is_modified(&rk->rk_conf, "client.software.name") &&
+            !rd_kafka_sw_str_is_safe(rk->rk_conf.sw_name))
+                rd_kafka_log(rk, LOG_WARNING, "CONFWARN",
+                             "Configuration property `client.software.name` "
+                             "may only contain 'a-zA-Z0-9.-', other characters "
+                             "will be replaced with '-'");
+
+        if (rd_kafka_conf_is_modified(&rk->rk_conf, "client.software.version") &&
+            !rd_kafka_sw_str_is_safe(rk->rk_conf.sw_version))
+                rd_kafka_log(rk, LOG_WARNING, "CONFWARN",
+                             "Configuration property `client.software.verison` "
+                             "may only contain 'a-zA-Z0-9.-', other characters "
+                             "will be replaced with '-'");
 
         return cnt;
 }

@@ -1903,7 +1903,14 @@ rd_kafka_handle_ApiVersion (rd_kafka_t *rk,
                 goto err;
 
 	rd_kafka_buf_read_i16(rkbuf, &ErrorCode);
-        rd_kafka_buf_read_i32(rkbuf, &ApiArrayCnt);
+        if (request->rkbuf_reqhdr.ApiVersion >= 3) {
+                uint64_t uva;
+                rd_assert(rkbuf->rkbuf_flags & RD_KAFKA_OP_F_FLEXVER);
+                rd_kafka_buf_read_uvarint(rkbuf, &uva);
+                ApiArrayCnt = (int32_t)uva - 1; /* COMPACT_ARRAY encoding */
+        } else
+                rd_kafka_buf_read_i32(rkbuf, &ApiArrayCnt);
+
 	if (ApiArrayCnt > 1000 || ApiArrayCnt < 0)
 		rd_kafka_buf_parse_fail(rkbuf,
 					"ApiArrayCnt %"PRId32" out of range",
@@ -1932,10 +1939,16 @@ rd_kafka_handle_ApiVersion (rd_kafka_t *rk,
 			   "  ApiKey %s (%hd) Versions %hd..%hd",
 			   rd_kafka_ApiKey2str(api->ApiKey),
 			   api->ApiKey, api->MinVer, api->MaxVer);
+
+                /* Discard struct tags */
+                rd_kafka_buf_skip_tags(rkbuf);
         }
 
         if (request->rkbuf_reqhdr.ApiVersion >= 1)
                 rd_kafka_buf_read_throttle_time(rkbuf);
+
+        /* Discard end tags */
+        rd_kafka_buf_skip_tags(rkbuf);
 
 	*api_cnt = ApiArrayCnt;
         qsort(*apis, *api_cnt, sizeof(**apis), rd_kafka_ApiVersion_key_cmp);
@@ -1975,15 +1988,38 @@ void rd_kafka_ApiVersionRequest (rd_kafka_broker_t *rkb,
         rd_kafka_buf_t *rkbuf;
 
         if (ApiVersion == -1)
-                ApiVersion = 0;
+                ApiVersion = 3;
 
         rkbuf = rd_kafka_buf_new_request(rkb, RD_KAFKAP_ApiVersion, 1, 4);
+
+        if (ApiVersion >= 3) {
+                /* KIP-511 adds software name and version through the optional
+                 * protocol fields defined in KIP-482.
+                 * As we don't yet support KIP-482 we handcraft the fields here
+                 * and mark the buffer as flexible-version for special
+                 * treatment in buf_finalize, et.al. */
+
+                /* No request header tags */
+                rd_kafka_buf_write_i8(rkbuf, 0);
+
+                rkbuf->rkbuf_flags |= RD_KAFKA_OP_F_FLEXVER;
+
+                /* ClientSoftwareName */
+                rd_kafka_buf_write_compact_str(rkbuf,
+                                               rkb->rkb_rk->rk_conf.sw_name, -1);
+
+                /* ClientSoftwareVersion */
+                rd_kafka_buf_write_compact_str(rkbuf,
+                                               rkb->rkb_rk->rk_conf.sw_version,
+                                               -1);
+
+                /* No struct tags */
+                rd_kafka_buf_write_i8(rkbuf, 0);
+        }
 
         /* Should be sent before any other requests since it is part of
          * the initial connection handshake. */
         rkbuf->rkbuf_prio = RD_KAFKA_PRIO_FLASH;
-
-	rd_kafka_buf_write_i32(rkbuf, 0); /* Empty array: request all APIs */
 
         /* Non-supporting brokers will tear down the connection when they
          * receive an unknown API request, so dont retry request on failure. */

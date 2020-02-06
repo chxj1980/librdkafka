@@ -947,6 +947,15 @@ static void rd_kafka_buf_finalize (rd_kafka_t *rk, rd_kafka_buf_t *rkbuf) {
 
         /* ApiVersion */
         rd_kafka_buf_update_i16(rkbuf, 4+2, rkbuf->rkbuf_reqhdr.ApiVersion);
+
+        /* If flexible version, update ClientId string length to
+         * COMPACT_STRING encoding which has the length start at 0 for NULL,
+         * 1 for empty, 2 for 1 byte, etc, basically +1. */
+        if (rkbuf->rkbuf_flags & RD_KAFKA_OP_F_FLEXVER && 0)
+                rd_kafka_buf_update_i16(rkbuf, 4+2+2+4,
+                                        strlen(rk->rk_conf.client_id_str) + 1);
+
+        rd_buf_dump(&rkbuf->rkbuf_buf, 1);
 }
 
 
@@ -1541,8 +1550,11 @@ static int rd_kafka_req_response (rd_kafka_broker_t *rkb,
 		   rkbuf->rkbuf_totlen, rkbuf->rkbuf_reshdr.CorrId,
 		   (float)req->rkbuf_ts_sent / 1000.0f);
 
-        /* Copy request's header to response object's reqhdr for convenience. */
+        /* Copy request's header and certain flags to response object's
+         * reqhdr for convenience. */
         rkbuf->rkbuf_reqhdr = req->rkbuf_reqhdr;
+        rkbuf->rkbuf_flags |= (req->rkbuf_flags &
+                               RD_KAFKA_BUF_FLAGS_RESP_COPY_MASK);
 
         /* Set up response reader slice starting past the response header */
         rd_slice_init(&rkbuf->rkbuf_reader, &rkbuf->rkbuf_buf,
